@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: nginx-deployment
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: nginx
@@ -14,6 +14,14 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: iamawantika/nginx-app:BUILD_NUMBER
+        image: kamble123456789/my-nginx-app:latest  # <-- updated Docker Hub image
+        imagePullPolicy: Always                       # <-- always pull latest image
         ports:
         - containerPort: 80
+        volumeMounts:
+        - name: html-volume
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: html-volume
+        configMap:
+          name: nginx-html      # <-- ConfigMap containing your HTML/CSS/JS files
