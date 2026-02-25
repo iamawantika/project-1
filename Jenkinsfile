@@ -2,67 +2,59 @@ pipeline {
     agent any
 
     environment {
-        // Docker image name for DEV environment
-        DOCKER_IMAGE = "kamble123456789/my-nginx-app:dev-${env.BRANCH_NAME}"
+        DOCKER_IMAGE = 'kamble123456789/my-nginx-app:dev'
+        DOCKER_REGISTRY_CREDENTIALS = 'docker-hub-credentials' // Set in Jenkins Credentials
     }
 
     stages {
         stage('Checkout') {
             steps {
-                // Pull code from Git branch
-                checkout scm
+                echo "Cloning Git repository..."
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "*/dev"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/iamawantika/project-1.git',
+                        credentialsId: 'github-credentials'
+                    ]]
+                ])
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image $DOCKER_IMAGE"
-                sh "docker build -t $DOCKER_IMAGE ."
+                echo "Building Docker image ${env.DOCKER_IMAGE}"
+                bat "docker build -t ${env.DOCKER_IMAGE} ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                echo "Pushing Docker image to Docker Hub"
-                // Use Docker Hub credentials
-                withDockerRegistry([credentialsId: 'dockerhub-credentials', url: 'https://index.docker.io/v1/']) {
-                    sh "docker push $DOCKER_IMAGE"
+                echo "Logging into Docker Hub..."
+                withCredentials([usernamePassword(credentialsId: env.DOCKER_REGISTRY_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
                 }
+
+                echo "Pushing Docker image to Docker Hub..."
+                bat "docker push ${env.DOCKER_IMAGE}"
             }
         }
 
-        stage('Update Kubernetes ConfigMap') {
+        stage('Clean Workspace') {
             steps {
-                echo "Updating Kubernetes ConfigMap for HTML changes"
-                // Use kubeconfig credential
-                withCredentials([file(credentialsId: 'local-kubeconfig', variable: 'KUBECONFIG_PATH')]) {
-                    sh """
-                    kubectl delete configmap nginx-html --ignore-not-found --kubeconfig=$KUBECONFIG_PATH
-                    kubectl create configmap nginx-html --from-file=$WORKSPACE/html/ --kubeconfig=$KUBECONFIG_PATH
-                    """
-                }
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                echo "Deploying to Kubernetes DEV environment"
-                withCredentials([file(credentialsId: 'local-kubeconfig', variable: 'KUBECONFIG_PATH')]) {
-                    sh """
-                    kubectl set image deployment/nginx-deployment nginx=$DOCKER_IMAGE --kubeconfig=$KUBECONFIG_PATH
-                    kubectl rollout status deployment/nginx-deployment --kubeconfig=$KUBECONFIG_PATH
-                    """
-                }
+                echo "Cleaning workspace..."
+                cleanWs()
             }
         }
     }
 
     post {
         success {
-            echo "✅ DEV Deployment successful for branch ${env.BRANCH_NAME}"
+            echo "✅ Pipeline completed successfully!"
         }
         failure {
-            echo "❌ DEV Deployment failed for branch ${env.BRANCH_NAME}"
+            echo "❌ Pipeline failed!"
         }
     }
 }
