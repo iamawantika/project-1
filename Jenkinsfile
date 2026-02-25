@@ -2,60 +2,67 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "iamawantika/nginx-app"
-        KUBE_DEPLOYMENT = "nginx-deployment"
-        CONTAINER_NAME = "nginx"
+        // Docker image name for DEV environment
+        DOCKER_IMAGE = "kamble123456789/my-nginx-app:dev-${env.BRANCH_NAME}"
     }
 
     stages {
-
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
-                git branch: 'master',
-                    url: 'https://github.com/iamawantika/project-1.git'
+                // Pull code from Git branch
+                checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh '''
-                docker build -t $IMAGE_NAME:$BUILD_NUMBER .
-                '''
+                echo "Building Docker image $DOCKER_IMAGE"
+                sh "docker build -t $DOCKER_IMAGE ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                sh '''
-                docker push $IMAGE_NAME:$BUILD_NUMBER
-                '''
+                echo "Pushing Docker image to Docker Hub"
+                // Use Docker Hub credentials
+                withDockerRegistry([credentialsId: 'dockerhub-credentials', url: 'https://index.docker.io/v1/']) {
+                    sh "docker push $DOCKER_IMAGE"
+                }
+            }
+        }
+
+        stage('Update Kubernetes ConfigMap') {
+            steps {
+                echo "Updating Kubernetes ConfigMap for HTML changes"
+                // Use kubeconfig credential
+                withCredentials([file(credentialsId: 'local-kubeconfig', variable: 'KUBECONFIG_PATH')]) {
+                    sh """
+                    kubectl delete configmap nginx-html --ignore-not-found --kubeconfig=$KUBECONFIG_PATH
+                    kubectl create configmap nginx-html --from-file=$WORKSPACE/html/ --kubeconfig=$KUBECONFIG_PATH
+                    """
+                }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh '''
-                kubectl set image deployment/$KUBE_DEPLOYMENT \
-                $CONTAINER_NAME=$IMAGE_NAME:$BUILD_NUMBER
-                '''
-            }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                sh '''
-                kubectl rollout status deployment/$KUBE_DEPLOYMENT
-                '''
+                echo "Deploying to Kubernetes DEV environment"
+                withCredentials([file(credentialsId: 'local-kubeconfig', variable: 'KUBECONFIG_PATH')]) {
+                    sh """
+                    kubectl set image deployment/nginx-deployment nginx=$DOCKER_IMAGE --kubeconfig=$KUBECONFIG_PATH
+                    kubectl rollout status deployment/nginx-deployment --kubeconfig=$KUBECONFIG_PATH
+                    """
+                }
             }
         }
     }
 
     post {
         success {
-            echo "✅ Deployment successful!"
+            echo "✅ DEV Deployment successful for branch ${env.BRANCH_NAME}"
         }
         failure {
-            echo "❌ Deployment failed!"
+            echo "❌ DEV Deployment failed for branch ${env.BRANCH_NAME}"
         }
     }
 }
